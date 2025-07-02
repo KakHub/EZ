@@ -110,10 +110,22 @@ local function findYourBaseIndex()
     return nil
 end
 local Players = game:GetService("Players")
+local plr = Players.LocalPlayer
 
 getgenv().Speed = 120
 getgenv().Enabled = false
 getgenv().executed = false
+getgenv().DefaultSpeed = 16 
+
+local function detectDefaultSpeed()
+    local char = plr.Character or plr.CharacterAdded:Wait()
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        getgenv().DefaultSpeed = hum.WalkSpeed
+    end
+end
+
+detectDefaultSpeed() -- run once at start
 
 local function bypassWalkSpeed()
     if getgenv().executed then
@@ -125,7 +137,7 @@ local function bypassWalkSpeed()
         local oldindex = mt.__index
         mt.__index = newcclosure(function(self, key)
             if key == "WalkSpeed" then
-                return 26 
+                return getgenv().DefaultSpeed
             end
             return oldindex(self, key)
         end)
@@ -133,7 +145,7 @@ local function bypassWalkSpeed()
 
     task.spawn(function()
         while getgenv().Enabled do
-            local char = Players.LocalPlayer.Character
+            local char = plr.Character
             if char then
                 local hum = char:FindFirstChildOfClass("Humanoid")
                 if hum then
@@ -145,10 +157,12 @@ local function bypassWalkSpeed()
     end)
 end
 
-Players.LocalPlayer.CharacterAdded:Connect(function(char)
+plr.CharacterAdded:Connect(function(char)
+    char:WaitForChild("Humanoid")
+    detectDefaultSpeed()
     if getgenv().Enabled then
         bypassWalkSpeed()
-        char:WaitForChild("Humanoid").WalkSpeed = getgenv().Speed
+        char.Humanoid.WalkSpeed = getgenv().Speed
     end
 end)
 
@@ -158,38 +172,34 @@ Tabs.Main:AddToggle("BoostSpeed", {
     Default = false,
 }):OnChanged(function(state)
     getgenv().Enabled = state
+    local char = plr.Character or plr.CharacterAdded:Wait()
+    local hum = char:FindFirstChildOfClass("Humanoid")
+
     if state then
         bypassWalkSpeed()
-        Fluent:Notify({
-            Title = "Speed Boost",
-            Content = "WORK",
-            Duration = 3
-        })
-    else
-        local char = Players.LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum.WalkSpeed = 16
-            end
-        end
-        Fluent:Notify({
-            Title = "Speed Boost",
-            Content = "RESET",
-            Duration = 3
-        })
+    elseif hum then
+        hum.WalkSpeed = getgenv().DefaultSpeed
     end
 end)
 
 local instantPromptEnabled = false
 local instantPromptLoop = nil
-local seenPrompts = {}
+local promptOriginalDurations = {}
 
 local function setPromptInstant(prompt)
-    if prompt:IsA("ProximityPrompt") and not seenPrompts[prompt] then
+    if prompt:IsA("ProximityPrompt") and not promptOriginalDurations[prompt] then
+        promptOriginalDurations[prompt] = prompt.HoldDuration
         prompt.HoldDuration = 0
-        seenPrompts[prompt] = true
     end
+end
+
+local function resetAllPrompts()
+    for prompt, original in pairs(promptOriginalDurations) do
+        if prompt and prompt:IsDescendantOf(game) then
+            prompt.HoldDuration = original
+        end
+    end
+    promptOriginalDurations = {}
 end
 
 local function startInstantPromptLoop()
@@ -199,7 +209,7 @@ local function startInstantPromptLoop()
             for _, v in ipairs(workspace:GetDescendants()) do
                 setPromptInstant(v)
             end
-            task.wait(1) -- Updates every 1 second (adjust if needed)
+            task.wait(1)
         end
     end)
 end
@@ -211,23 +221,15 @@ Tabs.Main:AddToggle("InstantPrompt", {
 }):OnChanged(function(state)
     instantPromptEnabled = state
     if state then
-        seenPrompts = {} -- reset cache on toggle
+        promptOriginalDurations = {}
         startInstantPromptLoop()
-        Fluent:Notify({
-            Title = "Instant Prompt",
-            Content = "Enabled and updating every second.",
-            Duration = 4
-        })
     else
         instantPromptEnabled = false
         instantPromptLoop = nil
-        Fluent:Notify({
-            Title = "Instant Prompt",
-            Content = "Disabled updates.",
-            Duration = 4
-        })
+        resetAllPrompts()
     end
 end)
+
 
 
 Tabs.Main:AddButton({
@@ -239,11 +241,6 @@ Tabs.Main:AddButton({
 
         local basesFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Bases")
         if not basesFolder then
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Bases folder not found!",
-                Duration = 4
-            })
             return
         end
 
@@ -254,24 +251,7 @@ Tabs.Main:AddButton({
             local lockButton = base and base.Important and base.Important:FindFirstChild("LockButton")
             if lockButton and hrp then
                 hrp.CFrame = lockButton.CFrame * CFrame.new(0, 3, 0)
-                Fluent:Notify({
-                    Title = "Teleported",
-                    Content = ("Teleported to Base %d LockButton."):format(foundBaseIndex),
-                    Duration = 5
-                })
-            else
-                Fluent:Notify({
-                    Title = "Error",
-                    Content = "LockButton not found in Base " .. foundBaseIndex,
-                    Duration = 4
-                })
             end
-        else
-            Fluent:Notify({
-                Title = "Not Found",
-                Content = "No base sign found with your username.",
-                Duration = 4
-            })
         end
     end
 })
@@ -282,11 +262,6 @@ Tabs.Main:AddButton({
     Callback = function()
         local basesFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Bases")
         if not basesFolder then
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Bases folder not found!",
-                Duration = 4
-            })
             return
         end
 
@@ -301,12 +276,6 @@ Tabs.Main:AddButton({
                 end
             end
         end
-
-        Fluent:Notify({
-            Title = "Done",
-            Content = ("Deleted Barrier folder(s) in %d base(s)."):format(deletedCount),
-            Duration = 5
-        })
     end
 })
 
@@ -320,11 +289,11 @@ local function parsePrice(priceText)
     return number
 end
 
-    Tabs.Main:AddSection("Extra")
+Tabs.Main:AddSection("Extra")
 
 Tabs.Main:AddButton({
-    Title = "Steal Highest Price (WAIT FOR FIX)",
-    Description = "Steal highest price",
+    Title = "Steal Highest Price Player",
+    Description = "Steal the highest price player",
     Callback = function()
         local character = plr.Character or plr.CharacterAdded:Wait()
         local playerHRP = character:WaitForChild("HumanoidRootPart")
@@ -336,31 +305,16 @@ Tabs.Main:AddButton({
         end
 
         local basesFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Bases")
-        if not basesFolder then
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Bases folder not found!",
-                Duration = 4
-            })
-            return
-        end
+        if not basesFolder then return end
 
         local yourBaseIndex = findYourBaseIndex()
-        if not yourBaseIndex then
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Could not find your base!",
-                Duration = 5
-            })
-            return
-        end
+        if not yourBaseIndex then return end
 
         local maxPrice = 0
-        local targetHRP = nil
-        local targetPrompt = nil
+        local targetHRP, targetPrompt = nil, nil
 
         for baseIndex = 1, 8 do
-            if baseIndex ~= yourBaseIndex then 
+            if baseIndex ~= yourBaseIndex then
                 local base = basesFolder:FindFirstChild(tostring(baseIndex))
                 if base and base:FindFirstChild("Important") then
                     local pads = base.Important:FindFirstChild("NPCPads")
@@ -402,41 +356,22 @@ Tabs.Main:AddButton({
 
         if targetHRP and baseLockButton then
             playerHRP.CFrame = targetHRP.CFrame * CFrame.new(0, 3, 0)
+
+            task.wait(0.1)
+
             if targetPrompt then
-                fireproximityprompt(targetPrompt, 0.5)
-                Fluent:Notify({
-                    Title = "Success",
-                    Content = ("Fired prompt on highest price NPC: $%d"):format(maxPrice),
-                    Duration = 5
-                })
-            else
-                Fluent:Notify({
-                    Title = "Warning",
-                    Content = "No SlotPrompt found on highest price NPC.",
-                    Duration = 4
-                })
+                for _ = 1, 6 do
+                    fireproximityprompt(targetPrompt, 0.5)
+                    task.wait(0.1) 
+                end
             end
 
-            -- Wait briefly before returning
-            task.wait(0.5)
-
-            -- Teleport back to your base LockButton
             playerHRP.CFrame = baseLockButton.CFrame * CFrame.new(0, 3, 0)
-
-            Fluent:Notify({
-                Title = "Returned",
-                Content = "Teleported back to your base.",
-                Duration = 4
-            })
-        else
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Could not find NPC or your base LockButton.",
-                Duration = 5
-            })
         end
     end
 })
+
+
 
 local lockToggle = Tabs.Main:AddToggle("AutoLockBase", {
     Title = "Auto Lock Your Base",
@@ -462,7 +397,6 @@ end
 local function fireLockTouch()
     local lockButton = findYourBaseLockButton()
     if lockButton then
-        -- Fire all TouchInterest events on the LockButton
         for _, ti in pairs(lockButton:GetChildren()) do
             if ti:IsA("TouchTransmitter") or ti.ClassName == "TouchInterest" then
                 firetouchinterest(plr.Character.HumanoidRootPart, lockButton, 0)
@@ -474,30 +408,17 @@ end
 
 lockToggle:OnChanged(function(state)
     if state then
-        -- Start auto lock loop
         autoLockConnection = game:GetService("RunService").Heartbeat:Connect(function()
             fireLockTouch()
         end)
-        Fluent:Notify({
-            Title = "Auto Lock",
-            Content = "Enabled auto lock of your base.",
-            Duration = 4
-        })
     else
-        -- Stop auto lock loop
         if autoLockConnection then
             autoLockConnection:Disconnect()
             autoLockConnection = nil
         end
-        Fluent:Notify({
-            Title = "Auto Lock",
-            Content = "Disabled auto lock of your base.",
-            Duration = 4
-        })
     end
 end)
 
--- Highlight Highest Price NPC ESP (exclude your base NPCs)
 local currentHighlightChar = nil
 local highlightRunning = false
 local highlightColor = Color3.new(1,1,1)
@@ -516,7 +437,7 @@ local function highlightHighestPriceNPC()
         local highestChar = nil
 
         for baseIndex = 1, 8 do
-            if baseIndex ~= yourBaseIndex then -- exclude your base NPCs
+            if baseIndex ~= yourBaseIndex then 
                 local base = Workspace.Map.Bases:FindFirstChild(tostring(baseIndex))
                 if base and base:FindFirstChild("Important") then
                     local pads = base.Important:FindFirstChild("NPCPads")
@@ -573,12 +494,12 @@ local function highlightHighestPriceNPC()
             end
         end
 
-        task.wait(2)
+        task.wait(0.5)
     end
 end
 
 local Toggle = Tabs.Main:AddToggle("HighlightHighestNPC", {
-    Title = "Highlight Highest Price",
+    Title = "ESP Highest Price",
     Default = false,
     Description = "ESP for highest price NPC"
 })
